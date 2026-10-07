@@ -508,8 +508,8 @@ const tgApiNode = (name, pos, tokenExpr) =>
 
 // ---------- WF: бот (WF1 + WF3 + WF4) ----------
 reset();
-// Токен: переменная окружения MTC_BOT_TOKEN (локальный n8n), иначе mtc.settings.bot_token.
-const TOKEN = "($env.MTC_BOT_TOKEN || $('Ctx').first().json.cfg.bot_token)";
+// Токен бота берётся из mtc.settings.bot_token (доступ к $env в нодах n8n закрыт по умолчанию).
+const TOKEN = "$('Ctx').first().json.cfg.bot_token";
 node('Telegram Trigger', 'n8n-nodes-base.telegramTrigger', 1.2, [0, 600],
   { updates: ['message', 'callback_query'], additionalFields: {} }, { credentials: TG, webhookId: randomUUID() });
 codeNode('Route', [220, 600], route);
@@ -628,7 +628,7 @@ writeFileSync(new URL('wf-bot.json', OUT), JSON.stringify(bot, null, 2));
 
 // ---------- WF2: планировщик ----------
 reset();
-const TOKEN2 = "($env.MTC_BOT_TOKEN || $('Tick').first().json.r.cfg.bot_token)";
+const TOKEN2 = "$('Tick').first().json.r.cfg.bot_token";
 node('Every 5 min', 'n8n-nodes-base.scheduleTrigger', 1.2, [0, 300], { rule: { interval: [{ field: 'minutes', minutesInterval: 5 }] } });
 pgNode('Tick', [220, 300], '=select mtc.scheduler_tick() as r');
 codeNode('Build messages', [440, 200], buildMessages);

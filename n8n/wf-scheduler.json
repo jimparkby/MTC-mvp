@@ -13,7 +13,7 @@
           ]
         }
       },
-      "id": "46873d9e-8f41-432c-aee5-891055c55031",
+      "id": "6384af97-f2e5-4940-8dc9-c2b229bd2bc0",
       "name": "Every 5 min",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -28,7 +28,7 @@
         "query": "=select mtc.scheduler_tick() as r",
         "options": {}
       },
-      "id": "729f9a3d-bd36-42fe-a235-f9a9fb57a391",
+      "id": "c31b7d78-d5b6-428f-9035-96043e7ee05d",
       "name": "Tick",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
@@ -47,7 +47,7 @@
       "parameters": {
         "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const r = $input.first().json.r;\n  const out = [];\n  for (const p of r.reminders) {\n    const who = (p.client_name || 'клиент') + ' (' + fmtPhone(p.phone) + ')';\n    const mins = Math.round((new Date(p.due_at) - Date.now()) / 60000);\n    const lead = mins >= 50 ? 'Через час срок' : mins > 0 ? 'Через ' + mins + ' мин срок' : 'Срок наступил';\n    if (p.who === 'manager') {\n      out.push(tg('sendMessage', {\n        chat_id: p.manager_tg,\n        text: '⏰ ' + lead + ': ' + lc(p.what) + ' · ' + who + ', до ' + relDue(p.due_at) + '.',\n        reply_markup: { inline_keyboard: [\n          [{ text: '✅ Выполнено', callback_data: 'done:' + p.id }, { text: '⏩ Перенести на завтра', callback_data: 'postpone:' + p.id }],\n          [{ text: '✉️ Черновик письма', callback_data: 'draft:' + p.id }, { text: '✖️ Отменить', callback_data: 'cancel:' + p.id }],\n        ] },\n      }));\n    } else {\n      const icon = p.action_type === 'payment' ? '💳' : '📌';\n      const name = p.client_name || 'Клиент';\n      const msg = (p.client_name ? p.client_name + ', добрый' : 'Добрый') + ' день! Напоминаем о договорённости: ' + lc(p.what) + ' — до ' + relDue(p.due_at) + '. Спасибо!';\n      out.push(tg('sendMessage', {\n        chat_id: p.manager_tg, parse_mode: 'HTML',\n        text: icon + ' ' + esc(name) + ' (' + esc(fmtPhone(p.phone)) + ') обещал: ' + esc(lc(p.what)) + ' — до ' + esc(relDue(p.due_at)) +\n          '. Отправить ему напоминание?\\n\\nТекст (нажмите, чтобы скопировать):\\n<code>' + esc(msg) + '</code>',\n        reply_markup: { inline_keyboard: [\n          [{ text: '✅ Клиент выполнил', callback_data: 'done:' + p.id }, { text: '⏩ На завтра', callback_data: 'postpone:' + p.id }],\n          [{ text: '✖️ Отменить', callback_data: 'cancel:' + p.id }],\n        ] },\n      }));\n    }\n  }\n  for (const p of r.escalations) {\n    const hours = Math.max(1, Math.floor((Date.now() - new Date(p.due_at)) / 3600e3));\n    const client = (p.client_name || 'клиент') + ' (' + fmtPhone(p.phone) + ')';\n    const what = p.who === 'manager'\n      ? (p.manager_name || 'Менеджер') + ' обещал: ' + lc(p.what) + ' · ' + client\n      : 'Клиент ' + client + ' обещал: ' + lc(p.what) + ' · менеджер ' + (p.manager_name || '');\n    const text = '⚠️ Просрочено на ' + hours + ' ч: ' + what + ', срок был ' + relDue(p.due_at) + '.';\n    if (p.supervisor_tg) out.push(tg('sendMessage', { chat_id: p.supervisor_tg, text }));\n    else out.push(tg('sendMessage', { chat_id: p.manager_tg, text: text + '\\n\\nРуководитель не назначен — /supervisor @username' }));\n  }\n  return out;\n"
       },
-      "id": "bfa0976d-90de-48bc-bb5a-2c051adb0058",
+      "id": "0ba9f54f-5e15-42b8-9ad4-72affbfb5486",
       "name": "Build messages",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -59,13 +59,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://api.telegram.org/bot{{ ($env.MTC_BOT_TOKEN || $('Tick').first().json.r.cfg.bot_token) }}/{{ $json.method }}",
+        "url": "=https://api.telegram.org/bot{{ $('Tick').first().json.r.cfg.bot_token }}/{{ $json.method }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.payload) }}",
         "options": {}
       },
-      "id": "63927667-ce00-45fa-a423-57411e71c5e6",
+      "id": "467fed63-7327-4855-a509-7ca7dba6cd07",
       "name": "TG API",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -79,7 +79,7 @@
       "parameters": {
         "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const r = $input.first().json.r;\n  return r.reminders.filter(p => p.who === 'manager').map(p => {\n    const m = mk(p.due_at);\n    const today = dayKey(p.due_at) === dayKey(Date.now());\n    const when = (today ? 'сегодня' : dayKey(p.due_at) - dayKey(Date.now()) === 1 ? 'завтра' : WD_FULL[m.getUTCDay()]) + ' в ' + m.getUTCHours() + ':' + pad(m.getUTCMinutes());\n    return { json: {\n      chat_id: p.manager_tg,\n      voice_id: r.cfg.tts_voice_id,\n      body: { text: 'Напоминаю: вы обещали клиенту ' + (p.client_name || '') + ' — ' + lc(p.what) + '. Срок — ' + when + '.', model_id: r.cfg.tts_model },\n    } };\n  });\n"
       },
-      "id": "8d57b6c9-cad7-45f7-b069-0ee37257296f",
+      "id": "6a4165c0-aed4-4c55-ad6d-6011908ebd45",
       "name": "Build voice",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -106,7 +106,7 @@
           }
         }
       },
-      "id": "fda2ea4d-86a4-4486-b972-036aa084e398",
+      "id": "49aa22f5-afb0-4f2e-9ea0-7bce86e8a9ed",
       "name": "ElevenLabs TTS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -125,7 +125,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://api.telegram.org/bot{{ ($env.MTC_BOT_TOKEN || $('Tick').first().json.r.cfg.bot_token) }}/sendVoice",
+        "url": "=https://api.telegram.org/bot{{ $('Tick').first().json.r.cfg.bot_token }}/sendVoice",
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
@@ -143,7 +143,7 @@
         },
         "options": {}
       },
-      "id": "28478bb0-6c50-4572-bbcf-933f05096715",
+      "id": "e322e8bf-0ef2-425f-a9df-bb8701881ad4",
       "name": "TG: sendVoice",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
