@@ -10,7 +10,9 @@ tests/results.csv       таблица прогона тестового наб�
 
 ## Текущее окружение (с 6 окт: automatization.luvo.by недоступен)
 
-- n8n локально: `C:\Users\User\n8n-local`, запуск — `powershell -File C:\Users\User\n8n-local\start.ps1`
+- n8n на Railway: https://n8n-production-a2e42.up.railway.app (проект `pleasing-contentment`, образ `n8nio/n8n:2.42.3`, volume `/home/node/.n8n`).
+  Токен бота берётся из `mtc.settings.bot_token`.
+- Запасной вариант — n8n локально: `C:\Users\User\n8n-local`, запуск — `powershell -File C:\Users\User\n8n-local\start.ps1`
   (поднимает cloudflared-туннель и n8n с `WEBHOOK_URL`; адрес туннеля новый при каждом запуске —
   после перезапуска выключить/включить воркфлоу бота, чтобы перерегистрировать вебхук).
 - Supabase: проект `mtc-mvp` (ref `sddnrieghizrgphkyenk`), схема `mtc` уже применена.
