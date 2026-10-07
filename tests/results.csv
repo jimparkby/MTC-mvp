@@ -1,0 +1,2 @@
+﻿call_no;file;type;expected_who;expected_what;expected_due;found_who;found_what;found_due;match;error_note
+1;call01.m4a;одно обещание;manager;выслать смету;пт 18:00;;;;;

@@ -1,0 +1,1375 @@
+{
+  "id": "mtcBotWorkflow01",
+  "name": "MTC · Бот (звонки, кнопки, команды)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "2b4d9516-9455-4d4b-8dd1-a11660100db1",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        600
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "mtc-telegram",
+          "name": "MTC Telegram Bot"
+        }
+      },
+      "webhookId": "46be9fbc-fa75-49fe-acdf-b1ddc42aeccc"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const u = $input.first().json;\n  const o = { kind: 'other' };\n  let from;\n  if (u.callback_query) {\n    const q = u.callback_query;\n    from = q.from;\n    Object.assign(o, {\n      kind: 'callback', data: q.data || '', cq_id: q.id,\n      chat_id: q.message?.chat?.id ?? q.from.id, message_id: q.message?.message_id,\n      msg_text: q.message?.text || '', reply_markup: q.message?.reply_markup || null,\n    });\n  } else if (u.message) {\n    const m = u.message;\n    from = m.from;\n    o.chat_id = m.chat.id;\n    const doc = m.document;\n    const docIsAudio = doc && (/^(audio|video)\\//.test(doc.mime_type || '') ||\n      /\\.(m4a|mp3|ogg|oga|opus|wav|amr|aac|3gp|flac|webm|mp4|caf)$/i.test(doc.file_name || ''));\n    const a = m.audio || m.voice || (docIsAudio ? doc : null);\n    if (m.chat.type !== 'private') o.kind = 'other';\n    else if (a) Object.assign(o, { kind: 'audio', file_id: a.file_id, file_size: a.file_size || 0, duration: a.duration || null, caption: m.caption || '' });\n    else if (m.text) Object.assign(o, { kind: m.text.startsWith('/') ? 'command' : 'text', text: m.text });\n  }\n  if (!from) return [];\n  Object.assign(o, {\n    tg_id: from.id,\n    name: [from.first_name, from.last_name].filter(Boolean).join(' '),\n    username: from.username || '',\n  });\n  return [{ json: o }];\n"
+      },
+      "id": "09e0d08d-3247-436c-b34e-c07a53ad21ba",
+      "name": "Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=select mtc.bot_register($mtc${{ JSON.stringify({ tg_id: $json.tg_id, name: $json.name, username: $json.username }) }}$mtc$::jsonb) as r",
+        "options": {}
+      },
+      "id": "1a7935f3-accb-4586-89ff-c1c753496ac2",
+      "name": "Register",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        440,
+        600
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "mtc-postgres",
+          "name": "MTC Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const r = $input.first().json.r;\n  return [{ json: { ...$('Route').first().json, user: r.user, cfg: r.cfg } }];\n"
+      },
+      "id": "3ebc71c8-2f4b-4d62-9e70-8e4a5e031314",
+      "name": "Ctx",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 5,
+        "output": "={{ ({ audio: 0, callback: 1, command: 2, text: 3 })[$json.kind] ?? 4 }}",
+        "options": {}
+      },
+      "id": "525cb3c4-97f2-4a02-bda2-e258e784d3ac",
+      "name": "Switch kind",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        880,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ ($env.MTC_BOT_TOKEN || $('Ctx').first().json.cfg.bot_token) }}/{{ $json.method }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "1f915f3f-2001-43a3-b932-292e8f7addf9",
+      "name": "TG API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3900,
+        900
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const phone = normPhone(c.caption);\n  if (c.file_size > 20 * 1024 * 1024) {\n    return [{ json: { ok: false, ...tg('sendMessage', { chat_id: c.chat_id, text: 'Файл больше 20 МБ — Telegram не даёт боту его скачать. Обрежьте или сожмите запись и пришлите снова.' }).json } }];\n  }\n  if (!phone) {\n    return [{ json: { ok: false, ...tg('sendMessage', { chat_id: c.chat_id, text: 'Не вижу номер клиента. Перешлите аудио ещё раз с подписью:\\n+375291234567 Сергей' }).json } }];\n  }\n  const name = c.caption.replace(/[+\\d][\\d\\s\\-()]{8,}\\d/, '').replace(/[,;·—–-]+/g, ' ').replace(/\\s+/g, ' ').trim();\n  return [{ json: { ok: true, phone, client_name: name } }];\n"
+      },
+      "id": "39b3c34d-6ea6-45e8-aa5c-2624abb760be",
+      "name": "Check caption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.ok ? 0 : 1 }}",
+        "options": {}
+      },
+      "id": "c03d543f-70cd-4323-9a36-9afd1e8b8a7b",
+      "name": "Caption OK?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ ($env.MTC_BOT_TOKEN || $('Ctx').first().json.cfg.bot_token) }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Ctx').first().json.chat_id, text: 'Разбираю звонок…' }) }}",
+        "options": {}
+      },
+      "id": "794bce02-19e6-4b49-a214-b259a5a01b9c",
+      "name": "TG: Разбираю",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        100
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=select mtc.start_call($mtc${{ JSON.stringify({ user_id: $('Ctx').first().json.user.id, phone: $('Check caption').first().json.phone, client_name: $('Check caption').first().json.client_name, file_id: $('Ctx').first().json.file_id, duration: $('Ctx').first().json.duration }) }}$mtc$::jsonb) as r",
+        "options": {}
+      },
+      "id": "3155fdc7-9c6a-4dfd-ad28-103486e567f6",
+      "name": "Start call",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1760,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "mtc-postgres",
+          "name": "MTC Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/bot{{ ($env.MTC_BOT_TOKEN || $('Ctx').first().json.cfg.bot_token) }}/getFile",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_id",
+              "value": "={{ $('Ctx').first().json.file_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "166ca816-8cdb-4bcd-8c03-25e887a743fd",
+      "name": "TG: getFile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/file/bot{{ ($env.MTC_BOT_TOKEN || $('Ctx').first().json.cfg.bot_token) }}/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "35046db6-c5e7-4488-905c-68e1e67aa6cf",
+      "name": "Download audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.elevenlabs.io/v1/speech-to-text",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "model_id",
+              "value": "={{ $('Ctx').first().json.cfg.stt_model }}"
+            },
+            {
+              "name": "diarize",
+              "value": "true"
+            },
+            {
+              "name": "num_speakers",
+              "value": "2"
+            },
+            {
+              "name": "tag_audio_events",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "043138c6-2204-4644-88bf-b0f99f7d1012",
+      "name": "ElevenLabs STT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        100
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mtc-elevenlabs",
+          "name": "ElevenLabs"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const PROMPT = \"Ты анализируешь расшифровку телефонного разговора менеджера с клиентом.\\nЗадача: найти все договорённости — конкретные обещания что-то сделать.\\nПравила:\\n- Обещание = кто-то из участников берёт на себя конкретное действие\\n  (отправить, перезвонить, оплатить, приехать, подготовить).\\n- Не считай обещанием общие фразы («будем на связи», «посмотрим»).\\n- who: \\\"manager\\\" или \\\"client\\\" — кто обещал.\\n- due_at: ISO 8601 с часовым поясом Europe/Minsk. Относительные сроки\\n  («завтра», «до пятницы», «через час») считай от текущей даты {{now}}.\\n  «До пятницы» без времени = пятница 18:00. «Завтра» без времени = 12:00.\\n  Если срок не назван — null.\\n- due_text: срок ровно как прозвучал.\\n- action_type: send_document | call_back | payment | meeting | other.\\n- quote: короткая дословная цитата из разговора, откуда взято обещание.\\n- summary: 2–3 предложения о сути разговора.\\n- client_summary_update: что нового важно запомнить о клиенте.\\n- Если договорённостей нет, верни пустой массив promises.\\n- Отвечай ТОЛЬКО JSON без пояснений и без ```.\\nФормат: {\\\"summary\\\": \\\"...\\\", \\\"client_summary_update\\\": \\\"...\\\", \\\"promises\\\": [{\\\"who\\\": \\\"manager\\\", \\\"what\\\": \\\"...\\\", \\\"due_at\\\": \\\"2026-10-09T18:00:00+03:00\\\", \\\"due_text\\\": \\\"до пятницы\\\", \\\"action_type\\\": \\\"send_document\\\", \\\"quote\\\": \\\"...\\\"}]}\\nМенеджер: {{manager_name}}. Клиент: {{client_name}}.\\nТекущая дата и время: {{now}} (Europe/Minsk).\";\n\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const call = $('Start call').first().json.r;\n  const stt = $input.first().json;\n  const lines = [];\n  let cur = null, buf = '';\n  for (const w of stt.words || []) {\n    if (w.type === 'audio_event') continue;\n    const sp = w.speaker_id ?? 'speaker_0';\n    if (w.type === 'word' && sp !== cur) {\n      if (buf.trim()) lines.push('Спикер ' + (Number(String(cur).replace(/\\D/g, '')) + 1) + ': ' + buf.trim());\n      cur = sp; buf = '';\n    }\n    buf += w.text;\n  }\n  if (buf.trim()) lines.push('Спикер ' + (Number(String(cur).replace(/\\D/g, '')) + 1) + ': ' + buf.trim());\n  const transcript = lines.length ? lines.join('\\n') : (stt.text || '').trim();\n  if (!transcript) {\n    return [{ json: { ok: false, error: 'STT: ' + JSON.stringify(stt.error || stt).slice(0, 500) } }];\n  }\n  const now = nowMinsk();\n  const system = PROMPT\n    .replaceAll('{{now}}', now)\n    .replaceAll('{{manager_name}}', c.user.name || 'менеджер')\n    .replaceAll('{{client_name}}', call.client_name || 'клиент');\n  const open = (call.open_promises || []).map(p => '- ' + (p.who === 'manager' ? 'менеджер' : 'клиент') + ': ' + p.what + (p.due_text ? ' (' + p.due_text + ')' : '')).join('\\n');\n  const user =\n    'Что уже известно о клиенте: ' + (call.client_summary || 'ничего, первый звонок') + '\\n' +\n    (open ? 'Открытые обещания из прошлых звонков (не дублируй, если в разговоре они не изменились):\\n' + open + '\\n' : '') +\n    '\\nСпикеры в расшифровке пронумерованы автоматически — кто из них менеджер, определи по смыслу.\\n\\nРасшифровка:\\n' + transcript;\n  const body = {\n    model: c.cfg.llm_model,\n    temperature: Number(c.cfg.llm_temperature || 0.1),\n    response_format: { type: 'json_object' },\n    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],\n  };\n  const retryBody = { ...body, messages: [...body.messages, { role: 'user', content: 'Верни строго один JSON-объект по формату, без текста вокруг.' }] };\n  return [{ json: { ok: true, transcript, body, retryBody } }];\n"
+      },
+      "id": "a64336ab-57f1-4687-9508-b2c303a710f6",
+      "name": "Build LLM request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.ok ? 0 : 1 }}",
+        "options": {}
+      },
+      "id": "b033338d-2a3b-4886-ba6b-08c4d8c28a36",
+      "name": "STT OK?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2860,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Title",
+              "value": "MTC promise agent"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "021818b2-2d36-4b76-8c52-920e735a6d9f",
+      "name": "LLM 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mtc-openrouter",
+          "name": "OpenRouter"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const resp = $input.first().json;\n  const call = $('Start call').first().json.r;\n  const req = $('Build LLM request').first().json;\n  const fail = (error, raw) => [{ json: { ok: false, error, raw: raw == null ? null : { content: String(raw).slice(0, 20000) } } }];\n  if (resp.error) return fail('LLM HTTP: ' + JSON.stringify(resp.error).slice(0, 500));\n  const content = resp.choices?.[0]?.message?.content;\n  if (!content) return fail('LLM: пустой ответ', JSON.stringify(resp));\n  const s = String(content).trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  let j;\n  try { j = JSON.parse(s.slice(a, b + 1)); } catch (e) { return fail('JSON не парсится: ' + e.message, content); }\n  if (typeof j.summary !== 'string' || !Array.isArray(j.promises)) return fail('Нет summary или promises', content);\n  const TYPES = ['send_document', 'call_back', 'payment', 'meeting', 'other'];\n  const promises = [];\n  for (const p of j.promises) {\n    if (!p || typeof p.what !== 'string' || !p.what.trim()) continue;\n    let due = null;\n    if (p.due_at) {\n      let str = String(p.due_at).trim();\n      if (!/([zZ]|[+-]\\d\\d:?\\d\\d)$/.test(str)) str += '+03:00';\n      const d = new Date(str);\n      if (!isNaN(d)) due = d.toISOString();\n    }\n    promises.push({\n      who: p.who === 'client' ? 'client' : 'manager',\n      what: p.what.trim(),\n      due_at: due,\n      due_text: p.due_text || null,\n      action_type: TYPES.includes(p.action_type) ? p.action_type : 'other',\n      quote: p.quote || null,\n    });\n  }\n  return [{ json: { ok: true, save: {\n    call_id: call.call_id, transcript: req.transcript, raw: j, summary: j.summary.trim(),\n    client_summary_update: j.client_summary_update || '', promises,\n  } } }];\n"
+      },
+      "id": "5568920a-cf8f-4eb1-a3e7-ad6e1055858c",
+      "name": "Parse 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.ok ? 0 : 1 }}",
+        "options": {}
+      },
+      "id": "f67e7122-d2f6-4f10-8ae5-c0b947e15c0c",
+      "name": "Parsed 1?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        3520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Title",
+              "value": "MTC promise agent"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build LLM request').first().json.retryBody) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "8547320b-ef10-46fc-b217-86a08727123b",
+      "name": "LLM 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3300,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mtc-openrouter",
+          "name": "OpenRouter"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const resp = $input.first().json;\n  const call = $('Start call').first().json.r;\n  const req = $('Build LLM request').first().json;\n  const fail = (error, raw) => [{ json: { ok: false, error, raw: raw == null ? null : { content: String(raw).slice(0, 20000) } } }];\n  if (resp.error) return fail('LLM HTTP: ' + JSON.stringify(resp.error).slice(0, 500));\n  const content = resp.choices?.[0]?.message?.content;\n  if (!content) return fail('LLM: пустой ответ', JSON.stringify(resp));\n  const s = String(content).trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();\n  const a = s.indexOf('{'), b = s.lastIndexOf('}');\n  let j;\n  try { j = JSON.parse(s.slice(a, b + 1)); } catch (e) { return fail('JSON не парсится: ' + e.message, content); }\n  if (typeof j.summary !== 'string' || !Array.isArray(j.promises)) return fail('Нет summary или promises', content);\n  const TYPES = ['send_document', 'call_back', 'payment', 'meeting', 'other'];\n  const promises = [];\n  for (const p of j.promises) {\n    if (!p || typeof p.what !== 'string' || !p.what.trim()) continue;\n    let due = null;\n    if (p.due_at) {\n      let str = String(p.due_at).trim();\n      if (!/([zZ]|[+-]\\d\\d:?\\d\\d)$/.test(str)) str += '+03:00';\n      const d = new Date(str);\n      if (!isNaN(d)) due = d.toISOString();\n    }\n    promises.push({\n      who: p.who === 'client' ? 'client' : 'manager',\n      what: p.what.trim(),\n      due_at: due,\n      due_text: p.due_text || null,\n      action_type: TYPES.includes(p.action_type) ? p.action_type : 'other',\n      quote: p.quote || null,\n    });\n  }\n  return [{ json: { ok: true, save: {\n    call_id: call.call_id, transcript: req.transcript, raw: j, summary: j.summary.trim(),\n    client_summary_update: j.client_summary_update || '', promises,\n  } } }];\n"
+      },
+      "id": "6408716e-0204-4edc-b2f8-79520c488a05",
+      "name": "Parse 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.ok ? 0 : 1 }}",
+        "options": {}
+      },
+      "id": "362e8a28-cfbe-43fb-a1f4-b666f75eead6",
+      "name": "Parsed 2?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        3740,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=select mtc.finish_call($mtc${{ JSON.stringify($json.save) }}$mtc$::jsonb) as r",
+        "options": {}
+      },
+      "id": "dd973e27-8ff8-430b-a8e4-53639c1d04d1",
+      "name": "Finish call",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3740,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "mtc-postgres",
+          "name": "MTC Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const call = $('Start call').first().json.r;\n  const saved = $input.first().json.r.promises || [];\n  const head = '📞 <b>' + esc(call.client_name || 'Клиент') + '</b> · ' + esc(fmtPhone(call.phone)) +\n    (call.call_no > 1 ? ' · звонок №' + call.call_no : '');\n  const sum = $input.first().json.r.summary;\n  let text = head + '\\n' + esc(sum) + '\\n\\n';\n  const kb = [];\n  if (!saved.length) text += 'Договорённостей не найдено.';\n  else {\n    text += '<b>Договорённости:</b>\\n';\n    saved.forEach((p, i) => {\n      const n = i + 1;\n      const when = p.due_at ? 'до ' + fmtDue(p.due_at) : (p.due_text ? p.due_text + ' (срок не распознан)' : 'срок не назван');\n      text += n + '. ' + (p.who === 'manager' ? 'Вы' : 'Клиент') + ' → ' + esc(lc(p.what)) + ' · ' + esc(when) + '\\n';\n      if (p.quote) text += '   <i>«' + esc(cut(p.quote, 150)) + '»</i>\\n';\n      kb.push([\n        { text: n + ' · Верно', callback_data: 'ok:' + p.id },\n        { text: n + ' · Исправить срок', callback_data: 'fix:' + p.id },\n        { text: n + ' · Удалить', callback_data: 'del:' + p.id },\n      ]);\n      if (p.who === 'manager' && p.action_type === 'send_document') {\n        kb.push([{ text: n + ' · ✉️ Черновик письма', callback_data: 'draft:' + p.id }]);\n      }\n    });\n  }\n  return [tg('sendMessage', { chat_id: c.chat_id, text: cut(text, 4000), parse_mode: 'HTML', reply_markup: { inline_keyboard: kb } })];\n"
+      },
+      "id": "68f7a2df-6137-40c6-ad6c-4d48dba8530e",
+      "name": "Build card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3960,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=select mtc.call_error($mtc${{ JSON.stringify({ call_id: $('Start call').first().json.r.call_id, error: $json.error, raw: $json.raw ?? null }) }}$mtc$::jsonb) as r",
+        "options": {}
+      },
+      "id": "bfb5eb09-0b68-4629-94dd-4ad9f9276a0c",
+      "name": "Call error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3960,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "mtc-postgres",
+          "name": "MTC Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  return [tg('sendMessage', { chat_id: c.chat_id, text: '❌ Не получилось разобрать звонок. Попробуйте прислать запись ещё раз.' })];\n"
+      },
+      "id": "2d6b8c2a-cc17-46a5-b3d1-6f3f4554b97e",
+      "name": "Error reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const [action, id] = String(c.data).split(':');\n  return [{ json: { action: action || 'noop', promise_id: Number(id) || 0 } }];\n"
+      },
+      "id": "578ff099-b8af-404d-b76a-472d71176111",
+      "name": "Callback parse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=select mtc.promise_action($mtc${{ JSON.stringify({ tg_id: $('Ctx').first().json.tg_id, action: $json.action, promise_id: $json.promise_id }) }}$mtc$::jsonb) as r",
+        "options": {}
+      },
+      "id": "138c3a46-9eab-4be0-a098-fd074f2d7f48",
+      "name": "Promise action",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1320,
+        700
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "mtc-postgres",
+          "name": "MTC Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const cp = $('Callback parse').first().json;\n  const r = $input.first().json.r || {};\n  const out = [];\n  const answer = text => out.push(tg('answerCallbackQuery', { callback_query_id: c.cq_id, text }));\n  if (cp.action === 'noop') { answer(''); return out; }\n  if (!r.ok) { answer('Обещание не найдено'); return out; }\n  const p = r.promise;\n  const id = String(p.id);\n  const rows = (c.reply_markup?.inline_keyboard || []);\n  const isMine = (b, acts) => acts.some(a => b.callback_data === a + ':' + id);\n  const replaceRow = (label, dropDraft) => {\n    const kb = [];\n    for (const row of rows) {\n      if (row.some(b => isMine(b, ['ok', 'fix', 'del']))) {\n        const n = String(row[0].text).split(' · ')[0];\n        kb.push([{ text: n + ' · ' + label, callback_data: 'noop' }]);\n      } else if (dropDraft && row.some(b => isMine(b, ['draft']))) {\n        continue;\n      } else kb.push(row);\n    }\n    out.push(tg('editMessageReplyMarkup', { chat_id: c.chat_id, message_id: c.message_id, reply_markup: { inline_keyboard: kb } }));\n  };\n  const finish = line => out.push(tg('editMessageText', { chat_id: c.chat_id, message_id: c.message_id, text: cut(c.msg_text, 3900) + '\\n\\n' + line }));\n  switch (cp.action) {\n    case 'ok': answer('Отмечено как верное'); replaceRow('✅ верно', false); break;\n    case 'del': answer('Удалено'); replaceRow('🗑 удалено', true); break;\n    case 'fix':\n      answer('Напишите новый срок');\n      out.push(tg('sendMessage', { chat_id: c.chat_id, text: '🕑 Новый срок для «' + p.what + '»?\\nНапишите, например: «завтра в 15:00», «пт 12:00», «через 2 часа».\\n/cancel — отмена.' }));\n      break;\n    case 'done': answer('Выполнено'); finish('✅ Выполнено'); break;\n    case 'postpone': answer('Перенесено на завтра'); finish('⏩ Перенесено на ' + fmtDue(p.due_at)); break;\n    case 'cancel': answer('Отменено'); finish('✖️ Отменено'); break;\n    case 'draft': answer('Готовлю черновик письма…'); break;\n  }\n  return out;\n"
+      },
+      "id": "45da7423-aab4-40d3-94e1-24f9e03a09c6",
+      "name": "Callback reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        650
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.r.ok && $json.r.action === 'draft' ? 0 : 1 }}",
+        "options": {}
+      },
+      "id": "874616a6-fc0a-44a5-8e61-fc6e0263eb28",
+      "name": "Is draft?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1540,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const p = $input.first().json.r.promise;\n  const system = 'Ты помогаешь менеджеру по продажам. Напиши короткий вежливый черновик письма клиенту на русском языке, ' +\n    'который выполняет обещание менеджера. Не выдумывай цены, сроки и факты, которых нет в разговоре — вместо них ставь [заполнить]. ' +\n    'Первая строка — «Тема: …», дальше текст письма с подписью «' + (c.user.name || 'Менеджер') + '». Только текст письма, без пояснений.';\n  const user = 'Клиент: ' + (p.client_name || 'клиент') + ' (' + p.phone + ')\\nОбещание: ' + p.what +\n    (p.due_text ? ' (' + p.due_text + ')' : '') + '\\nЧто известно о клиенте: ' + (p.client_summary || '—') +\n    '\\n\\nРасшифровка разговора:\\n' + cut(p.transcript || p.call_summary || '', 12000);\n  return [{ json: { body: {\n    model: c.cfg.llm_model, temperature: 0.4,\n    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],\n  } } }];\n"
+      },
+      "id": "662e7cd5-1e9b-4fe5-bfd2-1ff760a6fb40",
+      "name": "Build draft request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Title",
+              "value": "MTC promise agent"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "abdfcf9b-7a13-4b37-8684-6bf04bdd047a",
+      "name": "LLM draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        800
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mtc-openrouter",
+          "name": "OpenRouter"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const p = $('Promise action').first().json.r.promise;\n  const text = $input.first().json.choices?.[0]?.message?.content?.trim();\n  if (!text) return [tg('sendMessage', { chat_id: c.chat_id, text: 'Не получилось подготовить черновик, попробуйте ещё раз.' })];\n  return [tg('sendMessage', {\n    chat_id: c.chat_id, parse_mode: 'HTML',\n    text: '✉️ <b>Черновик письма</b> — ' + esc(p.client_name || 'клиенту') + '\\n\\n<pre>' + esc(cut(text, 3500)) + '</pre>\\n\\nПисьмо не отправлено: скопируйте и отправьте сами.',\n  })];\n"
+      },
+      "id": "673bad23-d194-4b5f-a5d2-5b54e35debba",
+      "name": "Draft message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const m = /^\\/(\\w+)(?:@\\w+)?\\s*([\\s\\S]*)$/.exec(c.text.trim()) || [];\n  let cmd = (m[1] || '').toLowerCase();\n  let arg = (m[2] || '').trim();\n  if (!['start', 'help', 'client', 'open', 'supervisor', 'cancel'].includes(cmd)) cmd = 'start';\n  if (cmd === 'help') cmd = 'start';\n  if (cmd === 'client') arg = normPhone(arg) || '';\n  return [{ json: { tg_id: c.tg_id, cmd, arg } }];\n"
+      },
+      "id": "06113e4d-ac6a-43be-99f1-40760c9808eb",
+      "name": "Command parse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=select mtc.bot_command($mtc${{ JSON.stringify($json) }}$mtc$::jsonb) as r",
+        "options": {}
+      },
+      "id": "12f4f438-4010-42ba-b1e2-b546552a76ea",
+      "name": "Command",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1320,
+        1000
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "mtc-postgres",
+          "name": "MTC Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const cp = $('Command parse').first().json;\n  const r = $input.first().json.r;\n  const send = (text, extra = {}) => tg('sendMessage', { chat_id: c.chat_id, text: cut(text, 4000), ...extra });\n  const promiseLine = (p, i, withClient) =>\n    (i + 1) + '. ' + (STATUS[p.status] || '') + ' ' + (p.who === 'manager' ? 'Вы' : 'Клиент') + ' → ' + lc(p.what) +\n    (p.due_at ? ' · до ' + fmtDue(p.due_at) : (p.due_text ? ' · ' + p.due_text : '')) +\n    (withClient ? ' · ' + (p.client_name || '') + ' ' + fmtPhone(p.phone) : '');\n\n  if (cp.cmd === 'client') {\n    if (!cp.arg) return [send('Формат: /client +375291234567')];\n    if (!r.found) return [send('Клиента ' + fmtPhone(cp.arg) + ' пока нет. Пришлите запись звонка с этим номером в подписи.')];\n    let t = '📇 ' + (r.client.name || 'Клиент') + ' · ' + fmtPhone(r.client.phone) + '\\n';\n    if (r.client.summary) t += '\\n🧠 ' + r.client.summary + '\\n';\n    t += '\\nЗвонки (' + r.calls.length + '):\\n' + r.calls.map(x => '• ' + fmtDue(x.created_at) + ' — ' + (x.summary || (x.status === 'error' ? 'ошибка разбора' : 'в обработке'))).join('\\n');\n    t += '\\n\\nОбещания:\\n' + (r.promises.length ? r.promises.map((p, i) => promiseLine(p, i, false)).join('\\n') : 'нет');\n    return [send(t)];\n  }\n  if (cp.cmd === 'open') {\n    if (!r.promises.length) return [send('Открытых обещаний нет 🎉')];\n    return [send('Открытые обещания (' + r.promises.length + '):\\n' + r.promises.slice(0, 40).map((p, i) => promiseLine(p, i, true)).join('\\n'))];\n  }\n  if (cp.cmd === 'supervisor') {\n    if (!r.ok && r.error === 'empty') return [send('Формат: /supervisor @username или /supervisor 123456789 (Telegram ID).')];\n    if (!r.ok) return [send('Не нашёл ' + r.arg + '. Пусть руководитель напишет этому боту /start, затем повторите команду. Или укажите числовой Telegram ID.')];\n    return [\n      send('Руководитель для эскалаций: ' + (r.supervisor_name || r.supervisor_tg) + '. Если обещание просрочено на час без отметки — он получит сообщение.'),\n      tg('sendMessage', { chat_id: r.supervisor_tg, text: 'Вас назначили руководителем для ' + (r.manager_name || 'менеджера') + '. Сюда будут приходить просроченные обещания.' }),\n    ];\n  }\n  if (cp.cmd === 'cancel') return [send('Ок, отменил.')];\n  return [send(\n    'Я слежу за договорённостями из звонков.\\n\\n' +\n    '1. Запишите звонок и перешлите аудио сюда.\\n' +\n    '2. В подписи — номер и имя клиента: +375291234567 Сергей\\n' +\n    '3. Через минуту пришлю карточку с обещаниями, а в срок — напоминание.\\n\\n' +\n    'Команды:\\n/client +375… — карточка клиента\\n/open — открытые обещания\\n/supervisor @username — руководитель для эскалаций' +\n    (r.has_supervisor ? '' : '\\n\\nРуководитель пока не назначен.'))];\n"
+      },
+      "id": "3c1a59bd-e225-45ab-91a6-9d65d060802b",
+      "name": "Command reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.user.pending?.type === 'fix' ? 0 : 1 }}",
+        "options": {}
+      },
+      "id": "889956de-84c3-4d83-a89b-e82eba9976a4",
+      "name": "Pending fix?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1100,
+        1250
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const system = 'Преобразуй срок, который написал пользователь, в дату и время. Текущая дата и время: ' + nowMinsk() + ' (Europe/Minsk). ' +\n    '«До пятницы» без времени = пятница 18:00. «Завтра» без времени = 12:00. ' +\n    'Верни ТОЛЬКО JSON {\"due_at\": \"YYYY-MM-DDTHH:MM:00+03:00\"} или {\"due_at\": null}, если срок не понятен.';\n  return [{ json: { body: {\n    model: c.cfg.llm_model, temperature: 0, response_format: { type: 'json_object' },\n    messages: [{ role: 'system', content: system }, { role: 'user', content: c.text }],\n  } } }];\n"
+      },
+      "id": "296e7fc8-6cb8-4bf4-9f4c-ca3d8c2f41bf",
+      "name": "Build due request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Title",
+              "value": "MTC promise agent"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "c6027a2c-ae36-40bb-bf8c-e33bb4fc0c43",
+      "name": "LLM due",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        1200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mtc-openrouter",
+          "name": "OpenRouter"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const content = $input.first().json.choices?.[0]?.message?.content || '';\n  let due = null;\n  try {\n    const j = JSON.parse(content.slice(content.indexOf('{'), content.lastIndexOf('}') + 1));\n    if (j.due_at) { let s = String(j.due_at); if (!/([zZ]|[+-]\\d\\d:?\\d\\d)$/.test(s)) s += '+03:00'; const d = new Date(s); if (!isNaN(d)) due = d.toISOString(); }\n  } catch (e) {}\n  if (!due) return [{ json: { ok: false, ...tg('sendMessage', { chat_id: c.chat_id, text: 'Не понял срок. Напишите, например: «завтра в 15:00» или «10.10 12:00». /cancel — отмена.' }).json } }];\n  return [{ json: { ok: true, tg_id: c.tg_id, promise_id: c.user.pending.promise_id, due_at: due } }];\n"
+      },
+      "id": "f9cf445d-a950-4ba8-a052-b97d0e4e0736",
+      "name": "Parse due",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 2,
+        "output": "={{ $json.ok ? 0 : 1 }}",
+        "options": {}
+      },
+      "id": "bc77ba34-c676-408b-a911-4962afa4de1f",
+      "name": "Due OK?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1980,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=select mtc.set_due($mtc${{ JSON.stringify({ tg_id: $json.tg_id, promise_id: $json.promise_id, due_at: $json.due_at }) }}$mtc$::jsonb) as r",
+        "options": {}
+      },
+      "id": "508b91c4-4f6e-41d8-bee5-7ff802d36f77",
+      "name": "Set due",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2200,
+        1150
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "mtc-postgres",
+          "name": "MTC Supabase Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  const r = $input.first().json.r;\n  if (!r.ok) return [tg('sendMessage', { chat_id: c.chat_id, text: 'Обещание не найдено.' })];\n  return [tg('sendMessage', { chat_id: c.chat_id, text: '🕑 Новый срок: ' + r.promise.what + ' · до ' + fmtDue(r.promise.due_at) })];\n"
+      },
+      "id": "e85812fa-de29-401f-86e6-3edd4b9eeb2d",
+      "name": "Due reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        1150
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];\nconst WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];\nconst MON = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];\nconst pad = n => String(n).padStart(2, '0');\n// Europe/Minsk = UTC+3 круглый год (без перехода на летнее время)\nconst mk = d => new Date(new Date(d).getTime() + 3 * 3600e3);\nconst dayKey = d => { const m = mk(d); return m.getUTCFullYear() * 400 + m.getUTCMonth() * 32 + m.getUTCDate(); };\nconst hhmm = d => { const m = mk(d); return pad(m.getUTCHours()) + ':' + pad(m.getUTCMinutes()); };\nfunction fmtDue(iso) {\n  if (!iso) return null;\n  const m = mk(iso);\n  return WD[m.getUTCDay()] + ' ' + m.getUTCDate() + ' ' + MON[m.getUTCMonth()] + ', ' + hhmm(iso);\n}\nfunction relDue(iso) {\n  if (!iso) return null;\n  const diff = Math.round((dayKey(iso) - dayKey(Date.now())));\n  if (diff === 0) return 'сегодня ' + hhmm(iso);\n  if (diff === 1) return 'завтра ' + hhmm(iso);\n  return fmtDue(iso);\n}\nfunction nowMinsk() {\n  const m = mk(Date.now());\n  return m.getUTCFullYear() + '-' + pad(m.getUTCMonth() + 1) + '-' + pad(m.getUTCDate()) + ' ' + hhmm(Date.now()) + ', ' + WD_FULL[m.getUTCDay()];\n}\nfunction fmtPhone(p) {\n  const m = /^\\+375(\\d{2})(\\d{3})(\\d{2})(\\d{2})$/.exec(p || '');\n  return m ? '+375 ' + m[1] + ' ' + m[2] + '-' + m[3] + '-' + m[4] : (p || '');\n}\nfunction normPhone(s) {\n  const t = String(s || '').replace(/[\\s\\-()]/g, '');\n  let m = t.match(/\\+?375\\d{9}/);\n  if (m) return '+' + m[0].replace(/^\\+/, '');\n  m = t.match(/(?:^|\\D)80(\\d{9})(?!\\d)/);\n  return m ? '+375' + m[1] : null;\n}\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst lc = s => (s ? s[0].toLowerCase() + s.slice(1) : s);\nconst cut = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s);\nconst STATUS = { open: '⏳', postponed: '⏩', overdue: '⚠️', done: '✅', cancelled: '✖️' };\nconst tg = (method, payload) => ({ json: { method, payload } });\n\n  const c = $('Ctx').first().json;\n  return [tg('sendMessage', { chat_id: c.chat_id, text: 'Пришлите запись звонка (аудио) с подписью: +375291234567 Сергей\\n/start — инструкция.' })];\n"
+      },
+      "id": "71fba460-9b85-464f-bf79-a8cd087da698",
+      "name": "Text hint",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        1350
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Register",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Register": {
+      "main": [
+        [
+          {
+            "node": "Ctx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ctx": {
+      "main": [
+        [
+          {
+            "node": "Switch kind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch kind": {
+      "main": [
+        [
+          {
+            "node": "Check caption",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Callback parse",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Command parse",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pending fix?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check caption": {
+      "main": [
+        [
+          {
+            "node": "Caption OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Caption OK?": {
+      "main": [
+        [
+          {
+            "node": "TG: Разбираю",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Разбираю": {
+      "main": [
+        [
+          {
+            "node": "Start call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start call": {
+      "main": [
+        [
+          {
+            "node": "TG: getFile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: getFile": {
+      "main": [
+        [
+          {
+            "node": "Download audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download audio": {
+      "main": [
+        [
+          {
+            "node": "ElevenLabs STT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ElevenLabs STT": {
+      "main": [
+        [
+          {
+            "node": "Build LLM request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM request": {
+      "main": [
+        [
+          {
+            "node": "STT OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "STT OK?": {
+      "main": [
+        [
+          {
+            "node": "LLM 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM 1": {
+      "main": [
+        [
+          {
+            "node": "Parse 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse 1": {
+      "main": [
+        [
+          {
+            "node": "Parsed 1?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsed 1?": {
+      "main": [
+        [
+          {
+            "node": "Finish call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM 2": {
+      "main": [
+        [
+          {
+            "node": "Parse 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse 2": {
+      "main": [
+        [
+          {
+            "node": "Parsed 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsed 2?": {
+      "main": [
+        [
+          {
+            "node": "Finish call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finish call": {
+      "main": [
+        [
+          {
+            "node": "Build card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build card": {
+      "main": [
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call error": {
+      "main": [
+        [
+          {
+            "node": "Error reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error reply": {
+      "main": [
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback parse": {
+      "main": [
+        [
+          {
+            "node": "Promise action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Promise action": {
+      "main": [
+        [
+          {
+            "node": "Callback reply",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Is draft?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback reply": {
+      "main": [
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is draft?": {
+      "main": [
+        [
+          {
+            "node": "Build draft request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build draft request": {
+      "main": [
+        [
+          {
+            "node": "LLM draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM draft": {
+      "main": [
+        [
+          {
+            "node": "Draft message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft message": {
+      "main": [
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command parse": {
+      "main": [
+        [
+          {
+            "node": "Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command": {
+      "main": [
+        [
+          {
+            "node": "Command reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command reply": {
+      "main": [
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pending fix?": {
+      "main": [
+        [
+          {
+            "node": "Build due request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Text hint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build due request": {
+      "main": [
+        [
+          {
+            "node": "LLM due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM due": {
+      "main": [
+        [
+          {
+            "node": "Parse due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse due": {
+      "main": [
+        [
+          {
+            "node": "Due OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Due OK?": {
+      "main": [
+        [
+          {
+            "node": "Set due",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set due": {
+      "main": [
+        [
+          {
+            "node": "Due reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Due reply": {
+      "main": [
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text hint": {
+      "main": [
+        [
+          {
+            "node": "TG API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
